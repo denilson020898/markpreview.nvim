@@ -49,6 +49,9 @@ function M.export(fmt, opts)
   if opts.font then
     vim.list_extend(args, { "--font", opts.font })
   end
+  if opts.width then
+    vim.list_extend(args, { "--width", opts.width })
+  end
 
   notify("exporting to " .. fmt .. " …")
   vim.system(args, { text = true }, function(res)

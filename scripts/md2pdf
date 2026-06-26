@@ -7,12 +7,13 @@
 # Style:     centered "zen" reading column, Hack Nerd Font, dark or light theme.
 #
 # Usage:
-#   md2pdf INPUT.md [-o OUT] [--theme dark|light] [--font NAME]
+#   md2pdf INPUT.md [-o OUT] [--theme dark|light] [--font NAME] [--width W]
 #                   [--html-only] [--keep-html] [--open]
 #   md2pdf -h
 #
-# Defaults: theme = dark for --html-only, light for PDF; font = "Hack Nerd Font".
-# Override with --theme/--font or env MD2PDF_THEME / MD2PDF_FONT / MD2PDF_ENGINE.
+# Defaults: theme = dark for --html-only, light for PDF; font = "Hack Nerd Font";
+# width = 60rem (HTML reading column; "none" for full width). Override with
+# --theme/--font/--width or env MD2PDF_THEME / MD2PDF_FONT / MD2PDF_WIDTH / MD2PDF_ENGINE.
 #
 # Examples:
 #   md2pdf notes.md                      # -> notes.pdf  (light)
@@ -26,13 +27,14 @@ set -euo pipefail
 die() { printf 'md2pdf: %s\n' "$1" >&2; exit 1; }
 
 # ---- args ---------------------------------------------------------------
-input=""; output=""; html_only=0; keep_html=0; open_after=0; theme=""; font=""
+input=""; output=""; html_only=0; keep_html=0; open_after=0; theme=""; font=""; width=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help)     sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -o|--output)   output="${2:-}"; shift 2 ;;
     --theme)       theme="${2:-}"; shift 2 ;;
     --font)        font="${2:-}"; shift 2 ;;
+    --width)       width="${2:-}"; shift 2 ;;
     --html-only)   html_only=1; shift ;;
     --keep-html)   keep_html=1; shift ;;
     --open)        open_after=1; shift ;;
@@ -56,6 +58,7 @@ if [ -z "$theme" ]; then
 fi
 case "$theme" in dark|light) ;; *) die "invalid --theme: $theme (use dark|light)";; esac
 font="${font:-${MD2PDF_FONT:-Hack Nerd Font}}"
+width="${width:-${MD2PDF_WIDTH:-60rem}}"
 
 if [ "$theme" = "dark" ]; then
   BG="#1b1d23"; FG="#cdd3de"; BORDER="#30363d"; CODEBG="#22262e"
@@ -91,7 +94,7 @@ html { -webkit-print-color-adjust: exact; print-color-adjust: exact; background:
 body {
   font-family: "$font", "Hack Nerd Font Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 16px; line-height: 1.7; color: var(--fg); background: var(--bg);
-  margin: 0 auto; max-width: 46rem; padding: 2.75rem 2rem; word-wrap: break-word;
+  margin: 0 auto; max-width: $width; padding: 2.25rem 1.25rem; word-wrap: break-word;
 }
 @media print {
   html, body { background: var(--bg); }

@@ -36,6 +36,13 @@ local defaults = {
     open = true, -- open the produced PDF/HTML in the system viewer when done
     theme = nil, -- nil = md2pdf default (dark HTML, light PDF); or "dark"/"light"
     font = nil, -- nil = md2pdf default ("Hack Nerd Font"); or any family name
+    width = nil, -- nil = md2pdf default ("60rem" HTML column); or e.g. "none"
+  },
+
+  -- In-buffer rendering (headings, lists, checkboxes, code, quotes, inline …).
+  -- Per-element options live in markpreview.render; merged over its defaults.
+  render = {
+    enable = true,
   },
 
   keymaps = {
@@ -52,6 +59,7 @@ local defaults = {
     -- View / export.
     wrap_toggle = "<localleader>w",
     export_pdf = "<localleader>p",
+    render_toggle = "<localleader>r",
   },
 }
 
@@ -89,6 +97,12 @@ function M.ensure_window(win)
   end
   if cfg.wrap.enable then
     require("markpreview.wrap").apply(win, cfg.wrap)
+  end
+  if cfg.render.enable then
+    -- conceallevel makes the rendered markers show; empty concealcursor reveals
+    -- the raw source on the cursor line so editing always sees the markup.
+    vim.api.nvim_set_option_value("conceallevel", 2, { win = win })
+    vim.api.nvim_set_option_value("concealcursor", "", { win = win })
   end
 end
 
@@ -132,6 +146,9 @@ local function setup_commands(buf)
   cmd("MarkExportHtml", function()
     require("markpreview.export").export("html", M.config.export)
   end, "Markdown: export this file to a self-contained HTML")
+  cmd("MarkRenderToggle", function()
+    require("markpreview.render").toggle(buf)
+  end, "Markdown: toggle in-buffer rendering")
   cmd("MarkFoldRefresh", function()
     require("markpreview.fold").clear(buf)
     vim.cmd("normal! zx")
@@ -165,6 +182,9 @@ local function setup_keymaps(buf)
   map(km.export_pdf, function()
     require("markpreview.export").export("pdf", M.config.export)
   end, "MD: export to PDF")
+  map(km.render_toggle, function()
+    require("markpreview.render").toggle(0)
+  end, "MD: toggle in-buffer rendering")
 end
 
 local function setup_autoformat(buf)
@@ -180,6 +200,20 @@ local function setup_autoformat(buf)
       end
     end,
   })
+end
+
+local function setup_render(buf)
+  local render = require("markpreview.render")
+  -- CursorMoved is included so the horizontal-rule overlay reveals the raw
+  -- `---` on the line being edited (inline conceal is handled by concealcursor).
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "InsertLeave", "CursorMoved" }, {
+    buffer = buf,
+    group = augroup,
+    callback = function()
+      render.schedule(buf)
+    end,
+  })
+  render.render(buf)
 end
 
 ---Attach the plugin to a buffer (idempotent). Buffer-local setup runs once;
@@ -198,6 +232,9 @@ function M.attach(buf)
     if M.config.tables.enable and M.config.tables.auto_format then
       setup_autoformat(buf)
     end
+    if M.config.render.enable then
+      setup_render(buf)
+    end
   end
   for _, win in ipairs(vim.fn.win_findbuf(buf)) do
     M.ensure_window(win)
@@ -207,6 +244,12 @@ end
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
   require("markpreview.fold").config = M.config.folding
+
+  -- Merge the render config over markpreview.render's full defaults (icons etc).
+  local render = require("markpreview.render")
+  render.config = vim.tbl_deep_extend("force", render.config, M.config.render or {})
+  render.filetypes = M.config.filetypes
+  render.setup_highlights()
 
   -- `sidescroll` is a global option; set it once for smooth no-wrap scrolling.
   if M.config.wrap.enable and M.config.wrap.sidescroll then
@@ -240,12 +283,25 @@ function M.setup(opts)
     group = augroup,
     callback = function(ev)
       require("markpreview.fold").clear(ev.buf)
+      require("markpreview.render").clear(ev.buf)
     end,
   })
 
-  -- Attach to any markdown buffers that are already open at setup time.
+  -- Re-link highlight groups when the colorscheme changes.
+  vim.api.nvim_create_autocmd("ColorScheme", {
+    group = augroup,
+    callback = function()
+      require("markpreview.render").setup_highlights()
+    end,
+  })
+
+  -- Attach to any markdown buffers that are already open at setup time. Reset
+  -- the per-buffer guard first: a re-setup() recreates `augroup` with
+  -- clear=true (dropping the buffer-local render/autoformat autocmds), so we
+  -- must let attach() fully re-run to re-register them.
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_loaded(buf) and vim.tbl_contains(fts, vim.bo[buf].filetype) then
+      vim.b[buf].markpreview_attached = nil
       M.attach(buf)
     end
   end

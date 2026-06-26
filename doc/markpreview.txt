@@ -7,11 +7,12 @@ CONTENTS                                                  *markpreview-contents*
   2. Setup ................... |markpreview-setup|
   3. Folding ................. |markpreview-folding|
   4. Tables .................. |markpreview-tables|
-  5. Wrap .................... |markpreview-wrap|
-  6. Export .................. |markpreview-export|
-  7. Commands ................ |markpreview-commands|
-  8. Mappings ................ |markpreview-mappings|
-  9. Configuration ........... |markpreview-config|
+  5. Rendering ............... |markpreview-rendering|
+  6. Wrap .................... |markpreview-wrap|
+  7. Export .................. |markpreview-export|
+  8. Commands ................ |markpreview-commands|
+  9. Mappings ................ |markpreview-mappings|
+ 10. Configuration ........... |markpreview-config|
 
 ==============================================================================
 1. INTRODUCTION                                              *markpreview-intro*
@@ -20,6 +21,7 @@ markpreview.nvim adds an editing/navigation layer for markdown buffers:
 
   - heading-based folding (ATX `#` and setext `===` / `---`)
   - GFM table editing: align, add/delete rows and columns, edit cells
+  - in-buffer rendering of headings, lists, code, quotes and inline markup
   - no-wrap by default with comfortable horizontal scrolling, plus a toggle
   - export to PDF / HTML via the bundled `md2pdf` script
 
@@ -108,7 +110,38 @@ when you leave insert mode. It only fires when the cursor is genuinely inside a
 table, so prose with inline pipes is left untouched.
 
 ==============================================================================
-5. WRAP                                                       *markpreview-wrap*
+5. RENDERING                                             *markpreview-rendering*
+
+markpreview can render markdown in the buffer itself (a focused subset of
+render-markdown.nvim), built on the bundled treesitter `markdown` /
+`markdown_inline` grammars. It renders:
+
+  - headings        per-level icon + colour (the `#`s are concealed)
+  - lists           `-`/`*`/`+` -> • ○ ◆ ◇ by depth
+  - task lists      `[ ]` -> ☐, `[x]` -> ☑
+  - code blocks     a background band + the language label (fences concealed)
+  - block quotes    a coloured bar in place of `>`
+  - thematic breaks a full-width rule
+  - inline          **bold** *italic* `code` ~~strike~~ and [links] with the
+                    markers concealed
+
+Concealing uses `conceallevel=2` with `concealcursor=''`, so the raw source is
+revealed on the line your cursor is on — you always edit the real text. Updates
+are debounced as you type. |:MarkRenderToggle| (`<localleader>r`) toggles it
+for the current buffer; set `render.enable = false` to disable globally, or any
+per-element flag (`render.heading.enable`, `render.code.enable`, …) to disable
+a piece. Icons and highlight groups (MarkpreviewH1.. MarkpreviewBullet,
+MarkpreviewQuote, MarkpreviewCodeBlock, …) are all overridable.
+
+Tables are intentionally left as markpreview-aligned monospace text: inline
+markup inside cells is NOT concealed there, because shrinking a cell's visual
+width would break the column alignment. Use |:MarkTableFormat| to align them.
+
+This replaces render-markdown.nvim for these elements; it is not a full clone
+(no LaTeX/callouts/box-drawn tables).
+
+==============================================================================
+6. WRAP                                                       *markpreview-wrap*
 
 Markdown windows get `nowrap` plus `sidescroll=1` and `sidescrolloff=8` for
 smooth horizontal scrolling of long lines and wide tables. |:MarkWrapToggle|
@@ -116,7 +149,7 @@ flips wrap on/off; turning it on also enables `linebreak`+`breakindent` so
 prose wraps at word boundaries with hanging indent.
 
 ==============================================================================
-6. EXPORT                                                   *markpreview-export*
+7. EXPORT                                                   *markpreview-export*
 
 Export the current file to PDF (or self-contained HTML) with no heavy
 dependencies. The pipeline is:
@@ -132,8 +165,9 @@ code highlighting, A4 `@page` margins, row/figure page-break avoidance).
 
 The HTML is styled as a centered "zen" reading column with padding, in Hack
 Nerd Font, and is dark by default for HTML / light by default for PDF. Override
-with `export.theme` ("dark"|"light") and `export.font` (any family name), or on
-the CLI with `--theme` / `--font`.
+with `export.theme` ("dark"|"light"), `export.font` (any family name) and
+`export.width` (the HTML column width, e.g. "60rem" — the default — or "none"
+for full width), or on the CLI with `--theme` / `--font` / `--width`.
 
 Requirements (all detected at run time):
   - pandoc                          (Markdown -> HTML)
@@ -151,7 +185,7 @@ Put it on your PATH (e.g. symlink `scripts/md2pdf` into `~/.local/bin`).
 it explicitly with `MD2PDF_ENGINE=wkhtmltopdf`.
 
 ==============================================================================
-7. COMMANDS                                               *markpreview-commands*
+8. COMMANDS                                               *markpreview-commands*
 
 All commands are buffer-local to attached markdown buffers.
 
@@ -179,9 +213,11 @@ All commands are buffer-local to attached markdown buffers.
 :MarkExportPdf          Export this file to PDF (pandoc + headless browser).
                                                              *:MarkExportHtml*
 :MarkExportHtml         Export this file to self-contained HTML.
+                                                           *:MarkRenderToggle*
+:MarkRenderToggle       Toggle in-buffer rendering for this buffer.
 
 ==============================================================================
-8. MAPPINGS                                               *markpreview-mappings*
+9. MAPPINGS                                               *markpreview-mappings*
 
 Default buffer-local normal-mode mappings (`<localleader>` is `\` unless you
 changed |maplocalleader|):
@@ -196,13 +232,14 @@ changed |maplocalleader|):
   <localleader>tD   delete column
   <localleader>w    toggle wrap
   <localleader>p    export to PDF
+  <localleader>r    toggle in-buffer rendering
 
 Mnemonic: the table keys mirror `hjkl` — j/k add rows below/above, h/l add
 columns left/right. Disable all mappings with `keymaps.enable = false`, or
 set an individual entry to `false`.
 
 ==============================================================================
-9. CONFIGURATION                                            *markpreview-config*
+10. CONFIGURATION                                           *markpreview-config*
 
 Defaults: >lua
     require("markpreview").setup({
@@ -228,6 +265,18 @@ Defaults: >lua
         open = true,
         theme = nil, -- "dark" | "light" (default: dark HTML, light PDF)
         font = nil, -- e.g. "Hack Nerd Font" (the default)
+        width = nil, -- HTML column width, e.g. "60rem" (default) or "none"
+      },
+      render = {
+        enable = true,
+        -- per-element flags + icons live in markpreview.render and are merged
+        -- over its defaults, e.g.:
+        -- heading = { enable = true, icons = { "󰲡", "󰲣", "󰲥", "󰲧", "󰲩", "󰲫" } },
+        -- bullet = { enable = true, icons = { "●", "○", "◆", "◇" } },
+        -- checkbox = { enable = true, checked = "󰱒", unchecked = "󰄱" },
+        -- code = { enable = true }, quote = { enable = true, icon = "▋" },
+        -- hr = { enable = true, char = "─" }, link = { enable = true, icon = "" },
+        -- conceal = true,
       },
       keymaps = {
         enable = true,
@@ -241,6 +290,7 @@ Defaults: >lua
         col_delete = "<localleader>tD",
         wrap_toggle = "<localleader>w",
         export_pdf = "<localleader>p",
+        render_toggle = "<localleader>r",
       },
     })
 <

@@ -9,14 +9,15 @@ An in-editor **markdown editing & navigation layer** for Neovim:
    cell in a floating window (each `<br>` is a line — press Enter to add one)
    from wherever the cursor sits. Alignment, wide/CJK widths and `|`/`\`
    escaping are all handled.
-3. **No wrap** — `nowrap` by default with smooth horizontal scrolling, and a
+3. **In-buffer rendering** — treesitter-driven: heading icons, list bullets,
+   task checkboxes, code-block backgrounds + language label, quote bars,
+   thematic rules, and concealed inline markers (**bold**, *italic*, `code`,
+   ~~strike~~, [links]). Raw source is revealed on the cursor line. A focused
+   subset of render-markdown.nvim — no extra plugin. `:MarkRenderToggle` / `\r`.
+4. **No wrap** — `nowrap` by default with smooth horizontal scrolling, and a
    one-key toggle to flip into word-aware soft wrap.
-4. **Export** — `:MarkExportPdf` / `:MarkExportHtml` via the bundled `md2pdf`
+5. **Export** — `:MarkExportPdf` / `:MarkExportHtml` via the bundled `md2pdf`
    script (pandoc → styled HTML → headless Chromium → PDF). Minimal deps.
-
-It is **complementary** to renderers like
-[render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim):
-that handles how markdown *looks*, this handles how you *move through and edit* it.
 
 ## Install (lazy.nvim, local checkout)
 
@@ -45,6 +46,7 @@ The table keys mirror `hjkl`:
 | `<localleader>tD`  | delete column        |
 | `<localleader>w`   | toggle wrap          |
 | `<localleader>p`   | export to PDF        |
+| `<localleader>r`   | toggle rendering     |
 
 Folding uses the native commands: `za` toggle, `zR` open all, `zM` close all,
 `zj`/`zk` to jump between folds.
@@ -54,7 +56,7 @@ Folding uses the native commands: `za` toggle, `zR` open all, `zM` close all,
 `:MarkTableFormat`, `:MarkTableCellEdit`, `:MarkTableRowBelow`,
 `:MarkTableRowAbove`, `:MarkTableColRight`, `:MarkTableColLeft`,
 `:MarkTableRowDelete`, `:MarkTableColDelete`, `:MarkWrapToggle`,
-`:MarkFoldRefresh`, `:MarkExportPdf`, `:MarkExportHtml`.
+`:MarkFoldRefresh`, `:MarkExportPdf`, `:MarkExportHtml`, `:MarkRenderToggle`.
 
 ## Export to PDF / HTML
 
@@ -71,11 +73,18 @@ md2pdf notes.md --html-only # -> notes.html
 ```
 
 Requires `pandoc` and a Chromium-family browser (Chrome/Chromium/Brave/Edge,
-auto-detected). `wkhtmltopdf` works only if forced via `MD2PDF_ENGINE`.
+auto-detected). `wkhtmltopdf` works only if forced via `MD2PDF_ENGINE`. The
+HTML reading-column width is `--width` (default `60rem`; `none` for full width).
 
 `:MarkExportPdf` / `:MarkExportHtml` (or `\p`) run this async, saving the buffer
 first, then **open the result** in your system viewer (`vim.ui.open`). Disable
 with `export = { open = false }`. The CLI has `--open` for the same.
+
+## Tests
+
+```sh
+nvim --headless -u NONE -i NONE -n -l tests/render_spec.lua
+```
 
 ## Configuration
 
