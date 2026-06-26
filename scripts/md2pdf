@@ -1,35 +1,38 @@
 #!/usr/bin/env bash
-# md2pdf — convert a Markdown file to PDF with minimal dependencies.
+# md2pdf — convert a Markdown file to PDF (or HTML) with minimal dependencies.
 #
 # Pipeline:  Markdown --(pandoc)--> self-contained styled HTML --(browser)--> PDF
 #
-# Required:  pandoc
-# PDF engine (first one found, override with MD2PDF_ENGINE):
-#   - a Chromium-family browser (google-chrome-stable / chromium / brave ...)
-#     via headless --print-to-pdf  (best CSS / table / page-break fidelity)
-#   - wkhtmltopdf                  (fallback)
+# Required:  pandoc + a Chromium-family browser (chrome/chromium/brave/edge).
+# Style:     centered "zen" reading column, Hack Nerd Font, dark or light theme.
 #
 # Usage:
-#   md2pdf INPUT.md [-o OUTPUT.pdf] [--html-only] [--keep-html] [--open]
+#   md2pdf INPUT.md [-o OUT] [--theme dark|light] [--font NAME]
+#                   [--html-only] [--keep-html] [--open]
 #   md2pdf -h
 #
+# Defaults: theme = dark for --html-only, light for PDF; font = "Hack Nerd Font".
+# Override with --theme/--font or env MD2PDF_THEME / MD2PDF_FONT / MD2PDF_ENGINE.
+#
 # Examples:
-#   md2pdf notes.md                 # -> notes.pdf
-#   md2pdf notes.md -o /tmp/out.pdf
-#   md2pdf notes.md --html-only     # -> notes.html only (no PDF step)
-#   MD2PDF_ENGINE=wkhtmltopdf md2pdf notes.md
+#   md2pdf notes.md                      # -> notes.pdf  (light)
+#   md2pdf notes.md --html-only          # -> notes.html (dark)
+#   md2pdf notes.md --theme dark         # dark PDF
+#   md2pdf notes.md --font "JetBrains Mono"
+#   md2pdf notes.md --open               # open the result afterwards
 
 set -euo pipefail
 
 die() { printf 'md2pdf: %s\n' "$1" >&2; exit 1; }
 
 # ---- args ---------------------------------------------------------------
-input=""; output=""; html_only=0; keep_html=0; open_after=0
+input=""; output=""; html_only=0; keep_html=0; open_after=0; theme=""; font=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    -h|--help)
-      sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)     sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -o|--output)   output="${2:-}"; shift 2 ;;
+    --theme)       theme="${2:-}"; shift 2 ;;
+    --font)        font="${2:-}"; shift 2 ;;
     --html-only)   html_only=1; shift ;;
     --keep-html)   keep_html=1; shift ;;
     --open)        open_after=1; shift ;;
@@ -46,13 +49,26 @@ base="${input%.*}"
 title="$(basename "$base")"
 [ -n "$output" ] || output="${base}.pdf"
 
-# ---- intermediate HTML --------------------------------------------------
-if [ "$html_only" -eq 1 ]; then
-  html="${base}.html"
+# ---- resolve theme + font -----------------------------------------------
+theme="${theme:-${MD2PDF_THEME:-}}"
+if [ -z "$theme" ]; then
+  if [ "$html_only" -eq 1 ]; then theme="dark"; else theme="light"; fi
+fi
+case "$theme" in dark|light) ;; *) die "invalid --theme: $theme (use dark|light)";; esac
+font="${font:-${MD2PDF_FONT:-Hack Nerd Font}}"
+
+if [ "$theme" = "dark" ]; then
+  BG="#1b1d23"; FG="#cdd3de"; BORDER="#30363d"; CODEBG="#22262e"
+  THEAD="#262b33"; ROWALT="#1f242b"; LINK="#6cb6ff"; QUOTEFG="#9aa4b2"
+  QUOTEBORDER="#3b434d"; HR="#30363d"; highlight="breezedark"
 else
-  html="$(mktemp --suffix=.html)"
+  BG="#ffffff"; FG="#1f2328"; BORDER="#d0d7de"; CODEBG="#eff1f3"
+  THEAD="#f1f3f5"; ROWALT="#f8fafc"; LINK="#0969da"; QUOTEFG="#57606a"
+  QUOTEBORDER="#d0d7de"; HR="#d0d7de"; highlight="tango"
 fi
 
+# ---- intermediate HTML --------------------------------------------------
+if [ "$html_only" -eq 1 ]; then html="${base}.html"; else html="$(mktemp --suffix=.html)"; fi
 css="$(mktemp --suffix=.css)"
 cleanup() {
   [ "$keep_html" -eq 1 ] || [ "$html_only" -eq 1 ] || rm -f "$html"
@@ -62,42 +78,49 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cat >"$css" <<'CSS'
+# CSS (variables are expanded by the shell; CSS itself uses no $ or backticks).
+cat >"$css" <<CSS
 @page { size: A4; margin: 18mm 16mm; }
+:root {
+  --bg: $BG; --fg: $FG; --border: $BORDER; --code-bg: $CODEBG;
+  --thead: $THEAD; --row-alt: $ROWALT; --link: $LINK;
+  --quote-fg: $QUOTEFG; --quote-border: $QUOTEBORDER; --hr: $HR;
+}
 * { box-sizing: border-box; }
-html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: var(--bg); }
 body {
-  font-family: -apple-system, "Segoe UI", Roboto, "Noto Sans", Helvetica, Arial, sans-serif;
-  font-size: 11pt; line-height: 1.55; color: #1f2328;
-  margin: 0; max-width: 100%; word-wrap: break-word;
+  font-family: "$font", "Hack Nerd Font Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 16px; line-height: 1.7; color: var(--fg); background: var(--bg);
+  margin: 0 auto; max-width: 46rem; padding: 2.75rem 2rem; word-wrap: break-word;
 }
-h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.4em 0 0.5em; break-after: avoid; }
-h1 { font-size: 1.9em; border-bottom: 2px solid #d0d7de; padding-bottom: .25em; }
-h2 { font-size: 1.5em; border-bottom: 1px solid #d8dee4; padding-bottom: .2em; }
-h3 { font-size: 1.25em; } h4 { font-size: 1.05em; }
-h1.title { border: 0; text-align: left; margin-top: 0; }
-p, ul, ol, blockquote, table, pre { margin: 0 0 0.85em; }
-a { color: #0969da; text-decoration: none; }
-code {
-  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.88em; background: #eff1f3; padding: .15em .35em; border-radius: 4px;
+@media print {
+  html, body { background: var(--bg); }
+  body { font-size: 11pt; line-height: 1.6; max-width: none; padding: 0; }
 }
+h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.6em 0 .6em; break-after: avoid; }
+h1 { font-size: 1.8em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+h2 { font-size: 1.45em; border-bottom: 1px solid var(--border); padding-bottom: .25em; }
+h3 { font-size: 1.2em; } h4 { font-size: 1.05em; }
+h1.title { border: 0; margin-top: 0; }
+p, ul, ol, blockquote, table, pre { margin: 0 0 1em; }
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { font-size: .9em; background: var(--code-bg); padding: .15em .4em; border-radius: 5px; }
 pre {
-  background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px;
-  padding: .8em 1em; overflow: auto; white-space: pre-wrap; word-wrap: break-word;
-  break-inside: avoid;
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: .9em 1.1em; overflow: auto; white-space: pre-wrap; word-wrap: break-word; break-inside: avoid;
 }
-pre code { background: none; padding: 0; font-size: 0.85em; }
-blockquote { color: #57606a; border-left: .25em solid #d0d7de; padding: 0 1em; margin-left: 0; }
+pre code { background: none; padding: 0; font-size: .92em; }
+blockquote { color: var(--quote-fg); border-left: .25em solid var(--quote-border); padding: .2em 1em; margin-left: 0; }
 table { border-collapse: collapse; width: 100%; font-size: .95em; break-inside: avoid; }
-th, td { border: 1px solid #d0d7de; padding: .45em .7em; text-align: left; vertical-align: top; }
-thead th { background: #f1f3f5; }
+th, td { border: 1px solid var(--border); padding: .5em .75em; text-align: left; vertical-align: top; }
+thead th { background: var(--thead); }
 tr { break-inside: avoid; }
-tbody tr:nth-child(even) { background: #f8fafc; }
+tbody tr:nth-child(even) { background: var(--row-alt); }
 img { max-width: 100%; }
-hr { border: 0; border-top: 1px solid #d0d7de; margin: 1.5em 0; }
-ul, ol { padding-left: 1.6em; }
-li { margin: .2em 0; }
+hr { border: 0; border-top: 1px solid var(--hr); margin: 1.8em 0; }
+ul, ol { padding-left: 1.5em; }
+li { margin: .25em 0; }
 li.task-list-item { list-style: none; margin-left: -1.3em; }
 table, figure, pre, blockquote { page-break-inside: avoid; }
 CSS
@@ -108,13 +131,13 @@ pandoc "$input" \
   --standalone \
   --embed-resources \
   --metadata title="$title" \
-  --highlight-style tango \
+  --highlight-style "$highlight" \
   --css "$css" \
   --resource-path "$(dirname "$input")" \
   -o "$html"
 
 if [ "$html_only" -eq 1 ]; then
-  printf 'md2pdf: wrote %s\n' "$html"
+  printf 'md2pdf: wrote %s  (%s theme)\n' "$html" "$theme"
   [ "$open_after" -eq 1 ] && command -v xdg-open >/dev/null && xdg-open "$html" >/dev/null 2>&1 || true
   exit 0
 fi
@@ -156,6 +179,6 @@ case "$engine" in
 esac
 
 [ -s "$out_abs" ] || die "PDF was not produced (engine: $engine)"
-printf 'md2pdf: wrote %s  (via %s)\n' "$output" "$engine"
+printf 'md2pdf: wrote %s  (%s theme, via %s)\n' "$output" "$theme" "$engine"
 [ "$open_after" -eq 1 ] && command -v xdg-open >/dev/null && xdg-open "$out_abs" >/dev/null 2>&1 || true
 exit 0

@@ -130,6 +130,11 @@ system viewer via |vim.ui.open()|; set `export.open = false` to disable that.
 The intermediate HTML uses an embedded print stylesheet (GitHub-like tables,
 code highlighting, A4 `@page` margins, row/figure page-break avoidance).
 
+The HTML is styled as a centered "zen" reading column with padding, in Hack
+Nerd Font, and is dark by default for HTML / light by default for PDF. Override
+with `export.theme` ("dark"|"light") and `export.font` (any family name), or on
+the CLI with `--theme` / `--font`.
+
 Requirements (all detected at run time):
   - pandoc                          (Markdown -> HTML)
   - a Chromium-family browser       (HTML -> PDF, headless --print-to-pdf)
@@ -221,6 +226,8 @@ Defaults: >lua
       },
       export = {
         open = true,
+        theme = nil, -- "dark" | "light" (default: dark HTML, light PDF)
+        font = nil, -- e.g. "Hack Nerd Font" (the default)
       },
       keymaps = {
         enable = true,

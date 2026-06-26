@@ -43,6 +43,12 @@ function M.export(fmt, opts)
   if fmt == "html" then
     table.insert(args, "--html-only")
   end
+  if opts.theme then
+    vim.list_extend(args, { "--theme", opts.theme })
+  end
+  if opts.font then
+    vim.list_extend(args, { "--font", opts.font })
+  end
 
   notify("exporting to " .. fmt .. " …")
   vim.system(args, { text = true }, function(res)

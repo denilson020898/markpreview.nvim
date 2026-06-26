@@ -59,8 +59,10 @@ Folding uses the native commands: `za` toggle, `zR` open all, `zM` close all,
 ## Export to PDF / HTML
 
 A standalone `scripts/md2pdf` does **Markdown → (pandoc) self-contained styled
-HTML → (headless Chromium) PDF** — no LaTeX, no pip/npm installs. Symlink it
-onto your `PATH` to use it anywhere, and `:MarkExportPdf` will pick it up:
+HTML → (headless Chromium) PDF** — no LaTeX, no pip/npm installs. Output is a
+centered "zen" reading column in Hack Nerd Font, **dark by default for HTML**
+and light for PDF (override with `--theme`/`--font`, or `export.theme`/
+`export.font`). Symlink it onto your `PATH`, and `:MarkExportPdf` picks it up:
 
 ```sh
 ln -s ~/Projects/markpreview.nvim/scripts/md2pdf ~/.local/bin/md2pdf
