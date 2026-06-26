@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# md2pdf — convert a Markdown file to PDF with minimal dependencies.
+#
+# Pipeline:  Markdown --(pandoc)--> self-contained styled HTML --(browser)--> PDF
+#
+# Required:  pandoc
+# PDF engine (first one found, override with MD2PDF_ENGINE):
+#   - a Chromium-family browser (google-chrome-stable / chromium / brave ...)
+#     via headless --print-to-pdf  (best CSS / table / page-break fidelity)
+#   - wkhtmltopdf                  (fallback)
+#
+# Usage:
+#   md2pdf INPUT.md [-o OUTPUT.pdf] [--html-only] [--keep-html] [--open]
+#   md2pdf -h
+#
+# Examples:
+#   md2pdf notes.md                 # -> notes.pdf
+#   md2pdf notes.md -o /tmp/out.pdf
+#   md2pdf notes.md --html-only     # -> notes.html only (no PDF step)
+#   MD2PDF_ENGINE=wkhtmltopdf md2pdf notes.md
+
+set -euo pipefail
+
+die() { printf 'md2pdf: %s\n' "$1" >&2; exit 1; }
+
+# ---- args ---------------------------------------------------------------
+input=""; output=""; html_only=0; keep_html=0; open_after=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -o|--output)   output="${2:-}"; shift 2 ;;
+    --html-only)   html_only=1; shift ;;
+    --keep-html)   keep_html=1; shift ;;
+    --open)        open_after=1; shift ;;
+    -*)            die "unknown option: $1" ;;
+    *)             [ -z "$input" ] && input="$1" || die "unexpected argument: $1"; shift ;;
+  esac
+done
+
+[ -n "$input" ] || die "no input file (try: md2pdf file.md)"
+[ -f "$input" ] || die "no such file: $input"
+command -v pandoc >/dev/null || die "pandoc is required but not installed"
+
+base="${input%.*}"
+title="$(basename "$base")"
+[ -n "$output" ] || output="${base}.pdf"
+
+# ---- intermediate HTML --------------------------------------------------
+if [ "$html_only" -eq 1 ]; then
+  html="${base}.html"
+else
+  html="$(mktemp --suffix=.html)"
+fi
+
+css="$(mktemp --suffix=.css)"
+cleanup() {
+  [ "$keep_html" -eq 1 ] || [ "$html_only" -eq 1 ] || rm -f "$html"
+  rm -f "$css"
+  [ -n "${crdir:-}" ] && rm -rf "$crdir"
+  return 0
+}
+trap cleanup EXIT
+
+cat >"$css" <<'CSS'
+@page { size: A4; margin: 18mm 16mm; }
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body {
+  font-family: -apple-system, "Segoe UI", Roboto, "Noto Sans", Helvetica, Arial, sans-serif;
+  font-size: 11pt; line-height: 1.55; color: #1f2328;
+  margin: 0; max-width: 100%; word-wrap: break-word;
+}
+h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.4em 0 0.5em; break-after: avoid; }
+h1 { font-size: 1.9em; border-bottom: 2px solid #d0d7de; padding-bottom: .25em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid #d8dee4; padding-bottom: .2em; }
+h3 { font-size: 1.25em; } h4 { font-size: 1.05em; }
+h1.title { border: 0; text-align: left; margin-top: 0; }
+p, ul, ol, blockquote, table, pre { margin: 0 0 0.85em; }
+a { color: #0969da; text-decoration: none; }
+code {
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em; background: #eff1f3; padding: .15em .35em; border-radius: 4px;
+}
+pre {
+  background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px;
+  padding: .8em 1em; overflow: auto; white-space: pre-wrap; word-wrap: break-word;
+  break-inside: avoid;
+}
+pre code { background: none; padding: 0; font-size: 0.85em; }
+blockquote { color: #57606a; border-left: .25em solid #d0d7de; padding: 0 1em; margin-left: 0; }
+table { border-collapse: collapse; width: 100%; font-size: .95em; break-inside: avoid; }
+th, td { border: 1px solid #d0d7de; padding: .45em .7em; text-align: left; vertical-align: top; }
+thead th { background: #f1f3f5; }
+tr { break-inside: avoid; }
+tbody tr:nth-child(even) { background: #f8fafc; }
+img { max-width: 100%; }
+hr { border: 0; border-top: 1px solid #d0d7de; margin: 1.5em 0; }
+ul, ol { padding-left: 1.6em; }
+li { margin: .2em 0; }
+li.task-list-item { list-style: none; margin-left: -1.3em; }
+table, figure, pre, blockquote { page-break-inside: avoid; }
+CSS
+
+pandoc "$input" \
+  --from gfm \
+  --to html5 \
+  --standalone \
+  --embed-resources \
+  --metadata title="$title" \
+  --highlight-style tango \
+  --css "$css" \
+  --resource-path "$(dirname "$input")" \
+  -o "$html"
+
+if [ "$html_only" -eq 1 ]; then
+  printf 'md2pdf: wrote %s\n' "$html"
+  [ "$open_after" -eq 1 ] && command -v xdg-open >/dev/null && xdg-open "$html" >/dev/null 2>&1 || true
+  exit 0
+fi
+
+# ---- pick a PDF engine --------------------------------------------------
+# Auto-detect Chromium-family browsers only: they render modern CSS/tables/
+# page-breaks faithfully. wkhtmltopdf is intentionally NOT auto-selected (its
+# old WebKit paginates badly on many distros); request it with MD2PDF_ENGINE.
+engine="${MD2PDF_ENGINE:-}"
+if [ -z "$engine" ]; then
+  for c in google-chrome-stable google-chrome chromium chromium-browser brave brave-browser microsoft-edge-stable; do
+    if command -v "$c" >/dev/null; then engine="$c"; break; fi
+  done
+fi
+[ -n "$engine" ] || die "no PDF engine found (install a Chromium browser, or set MD2PDF_ENGINE=wkhtmltopdf)"
+command -v "$engine" >/dev/null || die "PDF engine not found: $engine"
+
+html_abs="$(realpath "$html")"
+out_abs="$(realpath -m "$output")"
+
+case "$engine" in
+  wkhtmltopdf)
+    wkhtmltopdf --quiet --enable-local-file-access \
+      --page-size A4 --margin-top 18mm --margin-bottom 18mm \
+      --margin-left 16mm --margin-right 16mm \
+      "$html_abs" "$out_abs"
+    ;;
+  *) # Chromium family: isolated profile so it never clashes with a running browser
+    crdir="$(mktemp -d)"
+    log="$(mktemp)"
+    if ! "$engine" --headless=new --disable-gpu --no-sandbox \
+        --user-data-dir="$crdir" --no-pdf-header-footer \
+        --virtual-time-budget=5000 \
+        --print-to-pdf="$out_abs" "file://$html_abs" >"$log" 2>&1; then
+      cat "$log" >&2; rm -f "$log"; die "$engine failed to render the PDF"
+    fi
+    rm -f "$log"
+    ;;
+esac
+
+[ -s "$out_abs" ] || die "PDF was not produced (engine: $engine)"
+printf 'md2pdf: wrote %s  (via %s)\n' "$output" "$engine"
+[ "$open_after" -eq 1 ] && command -v xdg-open >/dev/null && xdg-open "$out_abs" >/dev/null 2>&1 || true
+exit 0

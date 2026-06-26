@@ -43,8 +43,9 @@ local defaults = {
     col_left = "<localleader>th",
     row_delete = "<localleader>td",
     col_delete = "<localleader>tD",
-    -- View.
+    -- View / export.
     wrap_toggle = "<localleader>w",
+    export_pdf = "<localleader>p",
   },
 }
 
@@ -119,6 +120,12 @@ local function setup_commands(buf)
   cmd("MarkWrapToggle", function()
     require("markpreview.wrap").toggle()
   end, "Markdown: toggle line wrap")
+  cmd("MarkExportPdf", function()
+    require("markpreview.export").export("pdf")
+  end, "Markdown: export this file to PDF (pandoc + headless browser)")
+  cmd("MarkExportHtml", function()
+    require("markpreview.export").export("html")
+  end, "Markdown: export this file to a self-contained HTML")
   cmd("MarkFoldRefresh", function()
     require("markpreview.fold").clear(buf)
     vim.cmd("normal! zx")
@@ -149,6 +156,9 @@ local function setup_keymaps(buf)
   map(km.wrap_toggle, function()
     require("markpreview.wrap").toggle()
   end, "MD: toggle wrap")
+  map(km.export_pdf, function()
+    require("markpreview.export").export("pdf")
+  end, "MD: export to PDF")
 end
 
 local function setup_autoformat(buf)

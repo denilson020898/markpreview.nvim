@@ -371,18 +371,43 @@ end
 
 -- Matches a <br> line break in any common form: <br>, <br/>, <br />, <BR>.
 local BR_PATTERN = "%s*<%s*[Bb][Rr]%s*/?%s*>%s*"
+local cell_ns = vim.api.nvim_create_namespace("markpreview_cell_edit")
+
+---Escape a logical cell value for storage: backslash first, then pipe, so a
+---literal `\` or `|` (or a `\|` sequence) survives a full round-trip.
+local function escape_cell(s)
+  return (s:gsub("\\", "\\\\"):gsub("|", "\\|"))
+end
+
+---Inverse of escape_cell: `\\` -> `\` then `\|` -> `|`. Other `\x` (e.g. a
+---Windows path `C:\x`) are left untouched.
+local function unescape_cell(s)
+  return (s:gsub("\\\\", "\\"):gsub("\\|", "|"))
+end
 
 ---Set the cell at absolute line `lnum`, column index `col`, to `value`, then
----re-align the table and restore the cursor to that cell.
-local function set_cell(buf, lnum, col, value)
+---re-align the table and restore the cursor (only in `origin_win`).
+---`expect` is the raw cell value captured when editing began; if the live cell
+---no longer matches it (the buffer changed underneath), the write is refused so
+---we never clobber the wrong row / a different table.
+local function set_cell(buf, lnum, col, value, expect, origin_win)
+  if not vim.api.nvim_buf_is_valid(buf) then
+    return
+  end
   local s, e = table_range(buf, lnum)
   if not s then
+    notify("table no longer found; cell edit not applied")
     return
   end
   local rows = read_table(buf, s, e)
   local r = lnum - s + 1
   local row = rows[r]
   if not row then
+    notify("table row moved; cell edit not applied")
+    return
+  end
+  if expect ~= nil and (row[col] or "") ~= expect then
+    notify("cell changed underneath; edit not applied")
     return
   end
   for j = #row + 1, col do
@@ -393,18 +418,16 @@ local function set_cell(buf, lnum, col, value)
   vim.api.nvim_buf_set_lines(buf, s - 1, e, false, out)
   local target = out[r] or ""
   local pos = { s + r - 1, math.max(0, cell_start_col(target, col) - 1) }
-  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
-    if vim.api.nvim_win_get_buf(win) == buf then
-      pcall(vim.api.nvim_win_set_cursor, win, pos)
-    end
+  if origin_win and vim.api.nvim_win_is_valid(origin_win) and vim.api.nvim_win_get_buf(origin_win) == buf then
+    pcall(vim.api.nvim_win_set_cursor, origin_win, pos)
   end
 end
 
 ---Open a floating editor for the cell under the cursor. The cell is shown as
 ---multi-line text (each `<br>` becomes a real line), so adding a line break is
----just pressing Enter. On save the lines are rejoined with `<br>`, pipes are
----escaped, and the table is re-aligned. <CR>/q/<C-s> (or leaving the window)
----save; <C-c> cancels.
+---just pressing Enter. On save the lines are rejoined with `<br>`, pipes and
+---backslashes are escaped, and the table is re-aligned. <CR>/q/<C-s> save;
+---<C-c> or leaving the window cancels. An unchanged cell is left untouched.
 function M.cell_edit()
   local ctx = context()
   if not ctx then
@@ -415,15 +438,20 @@ function M.cell_edit()
     return
   end
   local buf, col = ctx.buf, ctx.col
+  local origin_win = vim.api.nvim_get_current_win()
   local lnum = ctx.s + ctx.row_in_tbl - 1
   local cell = (ctx.rows[ctx.row_in_tbl] or {})[col] or ""
 
-  -- De-serialize for comfortable editing: <br> -> newline, \| -> |.
-  local display = cell:gsub(BR_PATTERN, "\n"):gsub("\\|", "|")
+  -- De-serialize for comfortable editing: <br> -> newline, then unescape.
+  local display = unescape_cell((cell:gsub(BR_PATTERN, "\n")))
   local lines = vim.split(display, "\n", { plain = true })
   if #lines == 0 then
     lines = { "" }
   end
+  local initial = vim.deepcopy(lines)
+
+  -- Track the cell's row with an extmark so edits above it relocate the target.
+  local mark = vim.api.nvim_buf_set_extmark(buf, cell_ns, lnum - 1, 0, {})
 
   local fbuf = vim.api.nvim_create_buf(false, true)
   vim.bo[fbuf].bufhidden = "wipe"
@@ -454,24 +482,31 @@ function M.cell_edit()
       return
     end
     done = true
-    local value
-    if save and vim.api.nvim_buf_is_valid(fbuf) then
-      local body = vim.api.nvim_buf_get_lines(fbuf, 0, -1, false)
-      while #body > 1 and vim.trim(body[#body]) == "" do
-        table.remove(body)
-      end
-      local parts = {}
-      for _, l in ipairs(body) do
-        parts[#parts + 1] = (vim.trim(l):gsub("|", "\\|"))
-      end
-      value = table.concat(parts, "<br>")
-    end
+    local mpos = vim.api.nvim_buf_get_extmark_by_id(buf, cell_ns, mark, {})
+    pcall(vim.api.nvim_buf_del_extmark, buf, cell_ns, mark)
+    local body = (save and vim.api.nvim_buf_is_valid(fbuf))
+        and vim.api.nvim_buf_get_lines(fbuf, 0, -1, false)
+      or nil
     if vim.api.nvim_win_is_valid(win) then
       vim.api.nvim_win_close(win, true)
     end
-    if value ~= nil then
-      set_cell(buf, lnum, col, value)
+    if not body then
+      return
     end
+    -- Unchanged? Leave the cell exactly as it was (preserves <br/> spelling,
+    -- surrounding spaces, and any trailing <br>).
+    if vim.deep_equal(body, initial) then
+      return
+    end
+    local parts = {}
+    for _, l in ipairs(body) do
+      parts[#parts + 1] = escape_cell(vim.trim(l))
+    end
+    if #mpos == 0 then
+      notify("cell location lost; edit not applied")
+      return
+    end
+    set_cell(buf, mpos[1] + 1, col, table.concat(parts, "<br>"), cell, origin_win)
   end
 
   local map = function(mode, lhs, fn)
@@ -489,11 +524,13 @@ function M.cell_edit()
   map({ "n", "i" }, "<C-c>", function()
     finish(false)
   end)
+  -- Leaving the float (focus change) cancels rather than committing half-typed
+  -- content; explicit <CR>/q/<C-s> is the only save path.
   vim.api.nvim_create_autocmd("WinLeave", {
     buffer = fbuf,
     once = true,
     callback = function()
-      finish(true)
+      finish(false)
     end,
   })
 end

@@ -8,9 +8,10 @@ CONTENTS                                                  *markpreview-contents*
   3. Folding ................. |markpreview-folding|
   4. Tables .................. |markpreview-tables|
   5. Wrap .................... |markpreview-wrap|
-  6. Commands ................ |markpreview-commands|
-  7. Mappings ................ |markpreview-mappings|
-  8. Configuration ........... |markpreview-config|
+  6. Export .................. |markpreview-export|
+  7. Commands ................ |markpreview-commands|
+  8. Mappings ................ |markpreview-mappings|
+  9. Configuration ........... |markpreview-config|
 
 ==============================================================================
 1. INTRODUCTION                                              *markpreview-intro*
@@ -18,8 +19,9 @@ CONTENTS                                                  *markpreview-contents*
 markpreview.nvim adds an editing/navigation layer for markdown buffers:
 
   - heading-based folding (ATX `#` and setext `===` / `---`)
-  - GFM table editing: align, add/delete rows and columns
+  - GFM table editing: align, add/delete rows and columns, edit cells
   - no-wrap by default with comfortable horizontal scrolling, plus a toggle
+  - export to PDF / HTML via the bundled `md2pdf` script
 
 It is complementary to in-buffer renderers such as render-markdown.nvim:
 that plugin handles how markdown *looks*, this one handles how you *move
@@ -66,6 +68,7 @@ mapping. The whole table is re-aligned after every edit; column alignment is
 read from the delimiter row (`:---` left, `---:` right, `:--:` center).
 
   |:MarkTableFormat|      align the table
+  |:MarkTableCellEdit|    edit the current cell in a floating window
   |:MarkTableRowBelow|    insert an empty row below the cursor
   |:MarkTableRowAbove|    insert an empty row above the cursor
   |:MarkTableColRight|    insert an empty column to the right
@@ -76,6 +79,24 @@ read from the delimiter row (`:---` left, `---:` right, `:--:` center).
 Rows are always inserted into the body, never above the header or delimiter.
 Cell widths use display width, so wide/CJK characters stay aligned. Escaped
 pipes (`\|`) inside cells are preserved.
+
+CELL EDITOR                                            *markpreview-cell-edit*
+
+|:MarkTableCellEdit| (`<localleader>tc`) opens a floating window holding just
+the cell under the cursor. A cell can't contain a real newline, so each `<br>`
+is shown as a separate line — to add a line break, just press Enter. On save
+the lines are rejoined with `<br>`, and `|`/`\` are escaped, then the table is
+re-aligned. Pipes and backslashes round-trip safely.
+
+  <CR> / q / <C-s>   save and re-align
+  <C-c>              cancel
+  leaving the window cancels (only the explicit keys above save)
+
+An unchanged cell is left exactly as-is (its `<br/>` spelling, spaces, and any
+trailing `<br>` are preserved). The edit is bound to the cell by an |extmark|,
+so it still lands correctly if lines shift while the editor is open; if the
+table changes underneath, the edit is refused rather than written to the wrong
+place.
 
 A line is treated as a table row only when it has a border pipe (it starts or
 ends with `|`). This is deliberate: it stops a prose line that merely contains
@@ -95,12 +116,43 @@ flips wrap on/off; turning it on also enables `linebreak`+`breakindent` so
 prose wraps at word boundaries with hanging indent.
 
 ==============================================================================
-6. COMMANDS                                               *markpreview-commands*
+6. EXPORT                                                   *markpreview-export*
+
+Export the current file to PDF (or self-contained HTML) with no heavy
+dependencies. The pipeline is:
+
+    Markdown --(pandoc)--> styled self-contained HTML --(headless browser)--> PDF
+
+|:MarkExportPdf| (`<localleader>p`) and |:MarkExportHtml| run the bundled
+`scripts/md2pdf` script asynchronously on the buffer's file (saving it first if
+modified) and report the result. The intermediate HTML uses an embedded
+print stylesheet (GitHub-like tables, code highlighting, A4 `@page` margins,
+row/figure page-break avoidance).
+
+Requirements (all detected at run time):
+  - pandoc                          (Markdown -> HTML)
+  - a Chromium-family browser       (HTML -> PDF, headless --print-to-pdf)
+    google-chrome / chromium / brave / edge — auto-detected
+
+`md2pdf` is usable on its own from any shell: >
+    md2pdf notes.md                 # -> notes.pdf
+    md2pdf notes.md -o out.pdf
+    md2pdf notes.md --html-only      # -> notes.html
+    md2pdf notes.md --open           # open the result with xdg-open
+<
+Put it on your PATH (e.g. symlink `scripts/md2pdf` into `~/.local/bin`).
+`wkhtmltopdf` is not auto-selected (its old WebKit paginates poorly); request
+it explicitly with `MD2PDF_ENGINE=wkhtmltopdf`.
+
+==============================================================================
+7. COMMANDS                                               *markpreview-commands*
 
 All commands are buffer-local to attached markdown buffers.
 
                                                             *:MarkTableFormat*
 :MarkTableFormat        Align the table under the cursor.
+                                                          *:MarkTableCellEdit*
+:MarkTableCellEdit      Edit the current cell in a floating window.
                                                           *:MarkTableRowBelow*
 :MarkTableRowBelow      Add an empty body row below the cursor.
                                                           *:MarkTableRowAbove*
@@ -117,14 +169,19 @@ All commands are buffer-local to attached markdown buffers.
 :MarkWrapToggle         Toggle line wrap in the current window.
                                                             *:MarkFoldRefresh*
 :MarkFoldRefresh        Recompute heading folds for the buffer.
+                                                              *:MarkExportPdf*
+:MarkExportPdf          Export this file to PDF (pandoc + headless browser).
+                                                             *:MarkExportHtml*
+:MarkExportHtml         Export this file to self-contained HTML.
 
 ==============================================================================
-7. MAPPINGS                                               *markpreview-mappings*
+8. MAPPINGS                                               *markpreview-mappings*
 
 Default buffer-local normal-mode mappings (`<localleader>` is `\` unless you
 changed |maplocalleader|):
 
   <localleader>tf   format/align table
+  <localleader>tc   edit current cell (floating window)
   <localleader>tj   add row below
   <localleader>tk   add row above
   <localleader>tl   add column right
@@ -132,13 +189,14 @@ changed |maplocalleader|):
   <localleader>td   delete row
   <localleader>tD   delete column
   <localleader>w    toggle wrap
+  <localleader>p    export to PDF
 
 Mnemonic: the table keys mirror `hjkl` — j/k add rows below/above, h/l add
 columns left/right. Disable all mappings with `keymaps.enable = false`, or
 set an individual entry to `false`.
 
 ==============================================================================
-8. CONFIGURATION                                            *markpreview-config*
+9. CONFIGURATION                                            *markpreview-config*
 
 Defaults: >lua
     require("markpreview").setup({
@@ -163,6 +221,7 @@ Defaults: >lua
       keymaps = {
         enable = true,
         format = "<localleader>tf",
+        cell_edit = "<localleader>tc",
         row_below = "<localleader>tj",
         row_above = "<localleader>tk",
         col_right = "<localleader>tl",
@@ -170,6 +229,7 @@ Defaults: >lua
         row_delete = "<localleader>td",
         col_delete = "<localleader>tD",
         wrap_toggle = "<localleader>w",
+        export_pdf = "<localleader>p",
       },
     })
 <
