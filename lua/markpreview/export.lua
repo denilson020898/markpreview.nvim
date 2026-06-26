@@ -10,9 +10,12 @@ local function notify(msg, level)
   vim.notify("[markpreview] " .. msg, level or vim.log.levels.INFO)
 end
 
----Export the current markdown buffer. `fmt` is "pdf" (default) or "html".
-function M.export(fmt)
+---Export the current markdown buffer.
+---@param fmt string|nil  "pdf" (default) or "html"
+---@param opts table|nil  { open = boolean } — open the result when done
+function M.export(fmt, opts)
   fmt = fmt or "pdf"
+  opts = opts or {}
   local file = vim.api.nvim_buf_get_name(0)
   if file == "" then
     notify("buffer has no file on disk — save it first", vim.log.levels.WARN)
@@ -34,6 +37,8 @@ function M.export(fmt)
     vim.cmd("silent keepalt write")
   end
 
+  -- md2pdf writes alongside the input: <name>.pdf, or <name>.html for html.
+  local result = vim.fn.fnamemodify(file, ":r") .. (fmt == "html" and ".html" or ".pdf")
   local args = { exe, file }
   if fmt == "html" then
     table.insert(args, "--html-only")
@@ -43,10 +48,16 @@ function M.export(fmt)
   vim.system(args, { text = true }, function(res)
     vim.schedule(function()
       local out = ((res.stdout or "") .. (res.stderr or "")):gsub("%s+$", "")
-      if res.code == 0 then
-        notify(out ~= "" and out or ("exported to " .. fmt))
-      else
+      if res.code ~= 0 then
         notify("export failed: " .. (out ~= "" and out or ("exit " .. res.code)), vim.log.levels.ERROR)
+        return
+      end
+      notify(out ~= "" and out or ("exported to " .. fmt))
+      if opts.open and vim.fn.filereadable(result) == 1 then
+        local _, oerr = vim.ui.open(result)
+        if oerr then
+          notify("exported, but could not open it: " .. oerr, vim.log.levels.WARN)
+        end
       end
     end)
   end)

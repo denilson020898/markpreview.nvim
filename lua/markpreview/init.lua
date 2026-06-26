@@ -32,6 +32,10 @@ local defaults = {
     auto_format = false, -- re-align the current table on InsertLeave
   },
 
+  export = {
+    open = true, -- open the produced PDF/HTML in the system viewer when done
+  },
+
   keymaps = {
     enable = true,
     -- Table editing (buffer-local, normal mode). Set any to false to skip it.
@@ -121,10 +125,10 @@ local function setup_commands(buf)
     require("markpreview.wrap").toggle()
   end, "Markdown: toggle line wrap")
   cmd("MarkExportPdf", function()
-    require("markpreview.export").export("pdf")
+    require("markpreview.export").export("pdf", { open = M.config.export.open })
   end, "Markdown: export this file to PDF (pandoc + headless browser)")
   cmd("MarkExportHtml", function()
-    require("markpreview.export").export("html")
+    require("markpreview.export").export("html", { open = M.config.export.open })
   end, "Markdown: export this file to a self-contained HTML")
   cmd("MarkFoldRefresh", function()
     require("markpreview.fold").clear(buf)
@@ -157,7 +161,7 @@ local function setup_keymaps(buf)
     require("markpreview.wrap").toggle()
   end, "MD: toggle wrap")
   map(km.export_pdf, function()
-    require("markpreview.export").export("pdf")
+    require("markpreview.export").export("pdf", { open = M.config.export.open })
   end, "MD: export to PDF")
 end
 

@@ -71,6 +71,10 @@ md2pdf notes.md --html-only # -> notes.html
 Requires `pandoc` and a Chromium-family browser (Chrome/Chromium/Brave/Edge,
 auto-detected). `wkhtmltopdf` works only if forced via `MD2PDF_ENGINE`.
 
+`:MarkExportPdf` / `:MarkExportHtml` (or `\p`) run this async, saving the buffer
+first, then **open the result** in your system viewer (`vim.ui.open`). Disable
+with `export = { open = false }`. The CLI has `--open` for the same.
+
 ## Configuration
 
 See `:help markpreview-config` for the full default table. Everything can be

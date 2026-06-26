@@ -125,9 +125,10 @@ dependencies. The pipeline is:
 
 |:MarkExportPdf| (`<localleader>p`) and |:MarkExportHtml| run the bundled
 `scripts/md2pdf` script asynchronously on the buffer's file (saving it first if
-modified) and report the result. The intermediate HTML uses an embedded
-print stylesheet (GitHub-like tables, code highlighting, A4 `@page` margins,
-row/figure page-break avoidance).
+modified) and report the result. When it finishes the result is opened in your
+system viewer via |vim.ui.open()|; set `export.open = false` to disable that.
+The intermediate HTML uses an embedded print stylesheet (GitHub-like tables,
+code highlighting, A4 `@page` margins, row/figure page-break avoidance).
 
 Requirements (all detected at run time):
   - pandoc                          (Markdown -> HTML)
@@ -217,6 +218,9 @@ Defaults: >lua
       tables = {
         enable = true,
         auto_format = false,
+      },
+      export = {
+        open = true,
       },
       keymaps = {
         enable = true,
