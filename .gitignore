@@ -1,0 +1,21 @@
+# Generated Neovim help tags
+doc/tags
+doc/tags-*
+tags
+
+# Compiled Lua
+*.luac
+
+# Lua tooling / dependencies
+lua_modules/
+.luarocks/
+luacov.*.out
+.luacheckcache
+
+# Editor / OS cruft
+*.swp
+*.swo
+*~
+.DS_Store
+Session.vim
+.netrwhist

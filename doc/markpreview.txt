@@ -1,0 +1,176 @@
+*markpreview.txt*        In-editor markdown: folding, tables, no-wrap
+
+==============================================================================
+CONTENTS                                                  *markpreview-contents*
+
+  1. Introduction ............ |markpreview-intro|
+  2. Setup ................... |markpreview-setup|
+  3. Folding ................. |markpreview-folding|
+  4. Tables .................. |markpreview-tables|
+  5. Wrap .................... |markpreview-wrap|
+  6. Commands ................ |markpreview-commands|
+  7. Mappings ................ |markpreview-mappings|
+  8. Configuration ........... |markpreview-config|
+
+==============================================================================
+1. INTRODUCTION                                              *markpreview-intro*
+
+markpreview.nvim adds an editing/navigation layer for markdown buffers:
+
+  - heading-based folding (ATX `#` and setext `===` / `---`)
+  - GFM table editing: align, add/delete rows and columns
+  - no-wrap by default with comfortable horizontal scrolling, plus a toggle
+
+It is complementary to in-buffer renderers such as render-markdown.nvim:
+that plugin handles how markdown *looks*, this one handles how you *move
+through and edit* it.
+
+==============================================================================
+2. SETUP                                                     *markpreview-setup*
+
+>lua
+    require("markpreview").setup({})
+<
+With lazy.nvim and a local checkout: >lua
+    {
+      dir = "/path/to/markpreview.nvim",
+      main = "markpreview",
+      ft = { "markdown", "markdown.mdx" },
+      opts = {},
+    }
+<
+The plugin attaches automatically to the |filetype|s in `config.filetypes`.
+
+==============================================================================
+3. FOLDING                                                 *markpreview-folding*
+
+Folds nest by heading depth. A `#` heading opens a level-1 fold, `##` a
+level-2 fold nested inside it, and so on. Setext headings (a paragraph
+underlined by `===` or `---`) are supported too and can be turned off with
+`folding.setext = false`; a multi-line setext heading folds from the first
+line of its paragraph. Blockquotes, list items and indented code followed by
+`===`/`---` are NOT treated as headings (no phantom folds).
+
+Fenced code blocks (``` and ~~~) and YAML/TOML frontmatter are skipped, so
+`#` comments in code and `---` separators do not create stray folds.
+
+Folds start open (`folding.default_level = 99`). Use the standard fold
+commands: `za` toggle, `zR` open all, `zM` close all, `zj`/`zk` to move
+between folds. If folds ever look stale, run |:MarkFoldRefresh|.
+
+==============================================================================
+4. TABLES                                                   *markpreview-tables*
+
+Place the cursor anywhere inside a pipe table and run any table command or
+mapping. The whole table is re-aligned after every edit; column alignment is
+read from the delimiter row (`:---` left, `---:` right, `:--:` center).
+
+  |:MarkTableFormat|      align the table
+  |:MarkTableRowBelow|    insert an empty row below the cursor
+  |:MarkTableRowAbove|    insert an empty row above the cursor
+  |:MarkTableColRight|    insert an empty column to the right
+  |:MarkTableColLeft|     insert an empty column to the left
+  |:MarkTableRowDelete|   delete the current row
+  |:MarkTableColDelete|   delete the current column
+
+Rows are always inserted into the body, never above the header or delimiter.
+Cell widths use display width, so wide/CJK characters stay aligned. Escaped
+pipes (`\|`) inside cells are preserved.
+
+A line is treated as a table row only when it has a border pipe (it starts or
+ends with `|`). This is deliberate: it stops a prose line that merely contains
+an inline pipe (e.g. `cmd | grep x`) from being swallowed and reflowed as
+cells. Borderless tables are detected once you add the outer pipes / format.
+
+Set `tables.auto_format = true` to re-align the current table automatically
+when you leave insert mode. It only fires when the cursor is genuinely inside a
+table, so prose with inline pipes is left untouched.
+
+==============================================================================
+5. WRAP                                                       *markpreview-wrap*
+
+Markdown windows get `nowrap` plus `sidescroll=1` and `sidescrolloff=8` for
+smooth horizontal scrolling of long lines and wide tables. |:MarkWrapToggle|
+flips wrap on/off; turning it on also enables `linebreak`+`breakindent` so
+prose wraps at word boundaries with hanging indent.
+
+==============================================================================
+6. COMMANDS                                               *markpreview-commands*
+
+All commands are buffer-local to attached markdown buffers.
+
+                                                            *:MarkTableFormat*
+:MarkTableFormat        Align the table under the cursor.
+                                                          *:MarkTableRowBelow*
+:MarkTableRowBelow      Add an empty body row below the cursor.
+                                                          *:MarkTableRowAbove*
+:MarkTableRowAbove      Add an empty body row above the cursor.
+                                                          *:MarkTableColRight*
+:MarkTableColRight      Add an empty column right of the cursor cell.
+                                                           *:MarkTableColLeft*
+:MarkTableColLeft       Add an empty column left of the cursor cell.
+                                                         *:MarkTableRowDelete*
+:MarkTableRowDelete     Delete the current row (not header/delimiter).
+                                                         *:MarkTableColDelete*
+:MarkTableColDelete     Delete the current column.
+                                                            *:MarkWrapToggle*
+:MarkWrapToggle         Toggle line wrap in the current window.
+                                                            *:MarkFoldRefresh*
+:MarkFoldRefresh        Recompute heading folds for the buffer.
+
+==============================================================================
+7. MAPPINGS                                               *markpreview-mappings*
+
+Default buffer-local normal-mode mappings (`<localleader>` is `\` unless you
+changed |maplocalleader|):
+
+  <localleader>tf   format/align table
+  <localleader>tj   add row below
+  <localleader>tk   add row above
+  <localleader>tl   add column right
+  <localleader>th   add column left
+  <localleader>td   delete row
+  <localleader>tD   delete column
+  <localleader>w    toggle wrap
+
+Mnemonic: the table keys mirror `hjkl` — j/k add rows below/above, h/l add
+columns left/right. Disable all mappings with `keymaps.enable = false`, or
+set an individual entry to `false`.
+
+==============================================================================
+8. CONFIGURATION                                            *markpreview-config*
+
+Defaults: >lua
+    require("markpreview").setup({
+      filetypes = { "markdown", "markdown.mdx" },
+      folding = {
+        enable = true,
+        default_level = 99,
+        setext = true,
+        fold_text = true,
+      },
+      wrap = {
+        enable = true,
+        wrap = false,
+        linebreak = true,
+        breakindent = true,
+        sidescrolloff = 8,
+      },
+      tables = {
+        enable = true,
+        auto_format = false,
+      },
+      keymaps = {
+        enable = true,
+        format = "<localleader>tf",
+        row_below = "<localleader>tj",
+        row_above = "<localleader>tk",
+        col_right = "<localleader>tl",
+        col_left = "<localleader>th",
+        row_delete = "<localleader>td",
+        col_delete = "<localleader>tD",
+        wrap_toggle = "<localleader>w",
+      },
+    })
+<
+vim:tw=78:ts=8:ft=help:norl:
