@@ -108,15 +108,15 @@ local TASK_MARKERS = { task_list_marker_checked = true, task_list_marker_uncheck
 local function render_block(buf, root, ctx)
   local cfg = M.config
   local q = (queries())
-  for id, node in q:iter_captures(root, buf) do
+  for id, node in q:iter_captures(root, buf, ctx.srow, ctx.erow + 1) do
     local cap = q.captures[id]
     local sr, sc, er, ec = node:range()
 
     if cap == "table" then
       -- Tables are left as markpreview-aligned monospace text; record their
       -- rows so inline markup inside cells is NOT concealed (which would shrink
-      -- cell widths and break the column alignment).
-      for r = sr, math.min(er - 1, ctx.line_count - 1) do
+      -- cell widths and break the column alignment). Clamp to the rendered band.
+      for r = math.max(sr, ctx.srow), math.min(er - 1, ctx.erow, ctx.line_count - 1) do
         ctx.in_table[r] = true
       end
     elseif cap == "heading" and cfg.heading.enable then
@@ -163,8 +163,8 @@ local function render_block(buf, root, ctx)
     elseif cap == "quote" and cfg.quote.enable then
       mark(buf, sr, sc, { end_col = sc + 1, conceal = cfg.quote.icon, hl_group = "MarkpreviewQuote" })
     elseif cap == "hr" and cfg.hr.enable then
-      -- Skip the cursor row so the raw `---` is visible/editable there.
-      if sr < ctx.line_count and sr ~= ctx.cursor_row then
+      -- Skip any window's cursor row so the raw `---` is visible/editable there.
+      if sr < ctx.line_count and not ctx.cursor_rows[sr] then
         local line = vim.api.nvim_buf_get_lines(buf, sr, sr + 1, false)[1] or ""
         mark(buf, sr, 0, {
           end_col = #line,
@@ -174,7 +174,7 @@ local function render_block(buf, root, ctx)
         })
       end
     elseif cap == "code" and cfg.code.enable then
-      for r = sr, math.min(er - 1, ctx.line_count - 1) do
+      for r = math.max(sr, ctx.srow), math.min(er - 1, ctx.erow, ctx.line_count - 1) do
         mark(buf, r, 0, { line_hl_group = "MarkpreviewCodeBlock" })
       end
       for c in node:iter_children() do
@@ -193,7 +193,7 @@ end
 local function render_inline(buf, root, ctx)
   local cfg = M.config
   local _, q = queries()
-  for id, node in q:iter_captures(root, buf) do
+  for id, node in q:iter_captures(root, buf, ctx.srow, ctx.erow + 1) do
     local cap = q.captures[id]
     local sr, sc, er, ec = node:range()
 
@@ -231,7 +231,9 @@ local function render_inline(buf, root, ctx)
   end
 end
 
----Re-render the whole buffer.
+---Re-render the buffer. Only the visible window range (plus a margin) is
+---decorated, so cost is bounded by the viewport, not the file size — this is
+---what keeps scrolling/typing fast in large documents.
 function M.render(buf)
   buf = (buf == nil or buf == 0) and vim.api.nvim_get_current_buf() or buf
   if not vim.api.nvim_buf_is_valid(buf) then
@@ -246,41 +248,65 @@ function M.render(buf)
   if not vim.tbl_contains(M.filetypes, vim.bo[buf].filetype) then
     return
   end
+
+  local lc = vim.api.nvim_buf_line_count(buf)
+
+  -- One band per window showing this buffer (margin bounded by that window's
+  -- height — never by the gap between two far-apart windows), plus the set of
+  -- cursor rows. If the buffer isn't displayed, there's nothing to render.
+  local bands, cursor_rows, hr_width = {}, {}, 80
+  for i, w in ipairs(vim.fn.win_findbuf(buf)) do
+    local wi = vim.fn.getwininfo(w)[1]
+    if wi then
+      local margin = math.max(20, wi.botline - wi.topline)
+      bands[#bands + 1] = { math.max(0, wi.topline - 1 - margin), math.min(lc - 1, wi.botline - 1 + margin) }
+      cursor_rows[vim.api.nvim_win_get_cursor(w)[1] - 1] = true
+      if i == 1 then
+        hr_width = math.max(1, wi.width - (wi.textoff or 0))
+      end
+    end
+  end
+  if #bands == 0 then
+    return
+  end
+  -- Merge overlapping/adjacent bands into a minimal set of disjoint ranges.
+  table.sort(bands, function(a, b)
+    return a[1] < b[1]
+  end)
+  local merged = { bands[1] }
+  for i = 2, #bands do
+    local last = merged[#merged]
+    if bands[i][1] <= last[2] + 1 then
+      last[2] = math.max(last[2], bands[i][2])
+    else
+      merged[#merged + 1] = bands[i]
+    end
+  end
+
   local ok, parser = pcall(vim.treesitter.get_parser, buf, "markdown")
   if not ok or not parser then
     return
   end
-  parser:parse(true)
 
-  -- A window showing this buffer, for the horizontal-rule width.
-  local win = vim.fn.win_findbuf(buf)[1]
-  local hr_width = 80
-  if win then
-    local info = vim.fn.getwininfo(win)[1]
-    if info then
-      hr_width = math.max(1, info.width - (info.textoff or 0))
+  for _, band in ipairs(merged) do
+    local srow, erow = band[1], band[2]
+    parser:parse({ srow, 0, erow + 1, 0 })
+    local ctx = {
+      line_count = lc,
+      in_table = {},
+      hr_width = hr_width,
+      cursor_rows = cursor_rows,
+      srow = srow,
+      erow = erow,
+    }
+    for _, tree in ipairs(parser:trees()) do
+      render_block(buf, tree:root(), ctx)
     end
-  end
-  -- Cursor row (so the HR rule isn't painted over the line being edited).
-  local cursor_row = -1
-  local cur = vim.api.nvim_get_current_win()
-  if vim.api.nvim_win_get_buf(cur) == buf then
-    cursor_row = vim.api.nvim_win_get_cursor(cur)[1] - 1
-  end
-
-  local ctx = {
-    line_count = vim.api.nvim_buf_line_count(buf),
-    in_table = {},
-    hr_width = hr_width,
-    cursor_row = cursor_row,
-  }
-  for _, tree in ipairs(parser:trees()) do
-    render_block(buf, tree:root(), ctx)
-  end
-  local inline = parser:children()["markdown_inline"]
-  if inline then
-    for _, tree in ipairs(inline:trees()) do
-      render_inline(buf, tree:root(), ctx)
+    local inline = parser:children()["markdown_inline"]
+    if inline then
+      for _, tree in ipairs(inline:trees()) do
+        render_inline(buf, tree:root(), ctx)
+      end
     end
   end
 end

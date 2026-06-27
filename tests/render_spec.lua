@@ -121,6 +121,52 @@ do
   check("live-render autocmd survives re-setup", #au > 0, #au)
 end
 
+-- viewport-only rendering: a large buffer is decorated near the window only,
+-- so cost stays bounded (this is the fix for slow scrolling in big files).
+do
+  local lines = {}
+  for i = 1, 400 do
+    lines[i] = "# Heading " .. i
+  end
+  local b = md(lines)
+  local function mark_on(row)
+    for _, m in ipairs(marks(b)) do
+      if m[2] == row then return true end
+    end
+    return false
+  end
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  vim.cmd("normal! zt")
+  R.render(b)
+  check("viewport: top heading rendered", mark_on(0))
+  check("viewport: far-off heading NOT rendered (row 300)", not mark_on(300))
+  check("viewport: bounded mark count (<150, not ~400)", #marks(b) < 150, #marks(b))
+  vim.api.nvim_win_set_cursor(0, { 300, 0 })
+  vim.cmd("normal! zz")
+  R.render(b)
+  check("viewport: heading near 300 rendered after scroll", mark_on(299))
+  check("viewport: top heading dropped after scroll away", not mark_on(0))
+end
+
+-- a large code block overlapping the viewport is banded only over visible rows,
+-- not its whole extent (so cost stays bounded by the screen, not block size).
+do
+  local lines = { "# Top", "```lua" }
+  for i = 1, 300 do
+    lines[#lines + 1] = "x" .. i .. " = " .. i
+  end
+  lines[#lines + 1] = "```"
+  local b = md(lines)
+  vim.api.nvim_win_set_cursor(0, { 150, 0 })
+  vim.cmd("normal! zz")
+  R.render(b)
+  local bands = 0
+  for _, m in ipairs(marks(b)) do
+    if m[4].line_hl_group == "MarkpreviewCodeBlock" then bands = bands + 1 end
+  end
+  check("code band clamped to viewport (<120, not ~300)", bands < 120, bands)
+end
+
 print(string.rep("-", 40))
 print(fails == 0 and "ALL RENDER SPEC TESTS PASSED" or (fails .. " RENDER SPEC TEST(S) FAILED"))
 vim.cmd(fails == 0 and "qa!" or "cq")

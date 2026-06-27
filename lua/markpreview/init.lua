@@ -204,9 +204,10 @@ end
 
 local function setup_render(buf)
   local render = require("markpreview.render")
-  -- CursorMoved is included so the horizontal-rule overlay reveals the raw
-  -- `---` on the line being edited (inline conceal is handled by concealcursor).
-  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "InsertLeave", "CursorMoved" }, {
+  -- WinScrolled re-renders the newly-visible lines (rendering is viewport-only);
+  -- CursorMoved lets the horizontal-rule overlay reveal the raw `---` on the
+  -- line being edited (inline conceal is handled by concealcursor).
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "InsertLeave", "CursorMoved", "WinScrolled" }, {
     buffer = buf,
     group = augroup,
     callback = function()
