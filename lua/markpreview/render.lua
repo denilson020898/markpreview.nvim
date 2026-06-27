@@ -27,6 +27,7 @@ M.config = {
   bullet = { enable = true, icons = { "●", "○", "◆", "◇" } },
   checkbox = { enable = true, checked = "󰱒", unchecked = "󰄱" },
   code = { enable = true },
+  table = { enable = true },
   quote = { enable = true, icon = "▋" },
   hr = { enable = true, char = "─" },
   link = { enable = true, icon = "" },
@@ -52,6 +53,8 @@ function M.setup_highlights()
   set("MarkpreviewCodeInfo", { link = "Comment" })
   set("MarkpreviewCodeBlock", { link = "ColorColumn" })
   set("MarkpreviewHr", { link = "@markup.heading" })
+  set("MarkpreviewTableBorder", { link = "Comment" })
+  set("MarkpreviewTableHeader", { bold = true })
   set("MarkpreviewBold", { bold = true })
   set("MarkpreviewItalic", { italic = true })
   set("MarkpreviewStrike", { strikethrough = true })
@@ -105,6 +108,196 @@ end
 local BULLET_MARKERS = { list_marker_minus = true, list_marker_star = true, list_marker_plus = true }
 local TASK_MARKERS = { task_list_marker_checked = true, task_list_marker_unchecked = true }
 
+-- ── tables ──────────────────────────────────────────────────────────────────
+local TBL_BR = "%s*<%s*[Bb][Rr]%s*/?%s*>%s*"
+
+local function tbl_unescape(s)
+  return (s:gsub("\\\\", "\\"):gsub("\\|", "|"))
+end
+
+local function tbl_split_cells(line)
+  local s = vim.trim(line):gsub("^|", ""):gsub("|%s*$", "")
+  local cells, buf, i = {}, "", 1
+  while i <= #s do
+    local ch = s:sub(i, i)
+    if ch == "\\" then
+      buf = buf .. s:sub(i, i + 1)
+      i = i + 2
+    elseif ch == "|" then
+      cells[#cells + 1] = vim.trim(buf)
+      buf, i = "", i + 1
+    else
+      buf = buf .. ch
+      i = i + 1
+    end
+  end
+  cells[#cells + 1] = vim.trim(buf)
+  return cells
+end
+
+local function tbl_is_delim(cells)
+  if #cells == 0 then
+    return false
+  end
+  for _, c in ipairs(cells) do
+    if not c:match("^:?%-+:?$") then
+      return false
+    end
+  end
+  return true
+end
+
+local function tbl_align(c)
+  local l, r = c:sub(1, 1) == ":", c:sub(-1) == ":"
+  if l and r then
+    return "center"
+  elseif r then
+    return "right"
+  end
+  return "left"
+end
+
+-- Split a cell's text on <br> into display segments (markers unescaped).
+local function tbl_segments(cell)
+  local out = {}
+  for seg in (cell:gsub(TBL_BR, "\n") .. "\n"):gmatch("(.-)\n") do
+    out[#out + 1] = tbl_unescape(vim.trim(seg))
+  end
+  if #out == 0 then
+    out = { "" }
+  end
+  return out
+end
+
+local function tbl_pad(s, w, align)
+  local extra = w - vim.fn.strdisplaywidth(s)
+  if extra <= 0 then
+    return s
+  end
+  if align == "right" then
+    return string.rep(" ", extra) .. s
+  elseif align == "center" then
+    local l = math.floor(extra / 2)
+    return string.rep(" ", l) .. s .. string.rep(" ", extra - l)
+  end
+  return s .. string.rep(" ", extra)
+end
+
+---Render a pipe table as a clean box: `│` borders, a `├─┼─┤` separator, and
+---cells with `<br>` line breaks stacked onto extra (virtual) lines. Column
+---widths come from the rendered segments, so it looks tidy even when the
+---source isn't aligned. The source line is concealed and the box is drawn with
+---virtual text/lines; the cursor's row is skipped so the raw markdown shows for
+---editing.
+local function render_table(buf, node, ctx)
+  local tsr, _, ter = node:range()
+  local last = math.min(ter - 1, ctx.line_count - 1)
+  local src = vim.api.nvim_buf_get_lines(buf, tsr, last + 1, false)
+  local rows = {}
+  for k, line in ipairs(src) do
+    rows[k] = { lnum = tsr + k - 1, raw = line, cells = tbl_split_cells(line) }
+  end
+  if #rows == 0 then
+    return
+  end
+
+  local delim
+  for i, r in ipairs(rows) do
+    if tbl_is_delim(r.cells) then
+      delim = i
+      break
+    end
+  end
+  local ncols = 0
+  for _, r in ipairs(rows) do
+    ncols = math.max(ncols, #r.cells)
+  end
+  if ncols == 0 then
+    return
+  end
+
+  local aligns, widths = {}, {}
+  for j = 1, ncols do
+    aligns[j] = delim and tbl_align(rows[delim].cells[j] or "") or "left"
+    widths[j] = 3
+  end
+  for i, r in ipairs(rows) do
+    if i ~= delim then
+      r.segs, r.maxseg = {}, 1
+      for j = 1, ncols do
+        local segs = tbl_segments(r.cells[j] or "")
+        r.segs[j] = segs
+        if #segs > r.maxseg then
+          r.maxseg = #segs
+        end
+        for _, s in ipairs(segs) do
+          local w = vim.fn.strdisplaywidth(s)
+          if w > widths[j] then
+            widths[j] = w
+          end
+        end
+      end
+    end
+  end
+
+  -- A boxed table is drawn with virtual text and can't be scrolled horizontally;
+  -- if it's wider than the window, leave it raw (the source still scrolls).
+  local total = ncols + 1
+  for j = 1, ncols do
+    total = total + widths[j] + 2
+  end
+  if total > (ctx.hr_width or 80) then
+    return
+  end
+
+  local HL, HHL = "MarkpreviewTableBorder", "MarkpreviewTableHeader"
+  local function hborder(l, m, rt)
+    local parts = {}
+    for j = 1, ncols do
+      parts[j] = string.rep("─", widths[j] + 2)
+    end
+    return { { l .. table.concat(parts, m) .. rt, HL } }
+  end
+  local function datachunks(r, k, texthl)
+    local chunks = { { "│", HL } }
+    for j = 1, ncols do
+      local seg = (r.segs and r.segs[j] and r.segs[j][k]) or ""
+      local cell = " " .. tbl_pad(seg, widths[j], aligns[j]) .. " "
+      chunks[#chunks + 1] = texthl and { cell, texthl } or { cell }
+      chunks[#chunks + 1] = { "│", HL }
+    end
+    return chunks
+  end
+
+  local n = #rows
+  for i, r in ipairs(rows) do
+    local L = r.lnum
+    if L >= ctx.srow and L <= ctx.erow and not ctx.cursor_rows[L] then
+      local vlines = {}
+      local opts = { end_col = #r.raw, conceal = "", virt_text_pos = "overlay", hl_mode = "combine" }
+      if i == delim then
+        opts.virt_text = hborder("├", "┼", "┤")
+      else
+        local texthl = (delim and i < delim) and HHL or nil
+        opts.virt_text = datachunks(r, 1, texthl)
+        for k = 2, (r.maxseg or 1) do
+          vlines[#vlines + 1] = datachunks(r, k, texthl)
+        end
+      end
+      if i == n then
+        vlines[#vlines + 1] = hborder("└", "┴", "┘")
+      end
+      if #vlines > 0 then
+        opts.virt_lines = vlines
+      end
+      mark(buf, L, 0, opts)
+      if i == 1 then
+        mark(buf, L, 0, { virt_lines = { hborder("┌", "┬", "┐") }, virt_lines_above = true })
+      end
+    end
+  end
+end
+
 local function render_block(buf, root, ctx)
   local cfg = M.config
   local q = (queries())
@@ -113,11 +306,13 @@ local function render_block(buf, root, ctx)
     local sr, sc, er, ec = node:range()
 
     if cap == "table" then
-      -- Tables are left as markpreview-aligned monospace text; record their
-      -- rows so inline markup inside cells is NOT concealed (which would shrink
-      -- cell widths and break the column alignment). Clamp to the rendered band.
+      -- Record table rows so inline markup inside cells is NOT concealed
+      -- (the box renderer draws the cells itself). Clamp to the rendered band.
       for r = math.max(sr, ctx.srow), math.min(er - 1, ctx.erow, ctx.line_count - 1) do
         ctx.in_table[r] = true
+      end
+      if cfg.table.enable then
+        render_table(buf, node, ctx)
       end
     elseif cap == "heading" and cfg.heading.enable then
       local marker

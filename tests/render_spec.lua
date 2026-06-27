@@ -77,14 +77,78 @@ do
   check("code block band", bands >= 3, bands)
 end
 
--- table cells keep raw markup (alignment preserved) -------------------------
+-- tables render as a box (│ borders, ├─┼─┤ separator); source rows concealed
 do
-  local b = md({ "| H | N |", "| - | - |", "| **b** | `c` |", "", "out **b** x" })
+  local b = md({ "| H | N |", "| - | - |", "| a | b |", "", "out **b** x" })
+  vim.api.nvim_win_set_cursor(0, { 5, 0 }) -- cursor off the table
   R.render(b)
-  local touched = {}
-  for _, m in ipairs(marks(b)) do touched[m[2]] = true end
-  check("table rows not inline-rendered", not (touched[0] or touched[1] or touched[2]), vim.inspect(touched))
-  check("inline still rendered outside tables", touched[4] == true)
+  local function row_vt(row)
+    for _, m in ipairs(marks(b)) do
+      if m[2] == row and m[4].virt_text then
+        local s = ""
+        for _, c in ipairs(m[4].virt_text) do
+          s = s .. c[1]
+        end
+        return s
+      end
+    end
+    return ""
+  end
+  local function concealed(row)
+    for _, m in ipairs(marks(b)) do
+      if m[2] == row and m[4].conceal == "" then
+        return true
+      end
+    end
+    return false
+  end
+  check("table header drawn with │ box", row_vt(0):find("│", 1, true) ~= nil, row_vt(0))
+  check("delimiter row drawn as ├─┼─┤", row_vt(1):find("├", 1, true) ~= nil, row_vt(1))
+  check("table source rows concealed", concealed(0) and concealed(1) and concealed(2))
+  local bold = false
+  for _, m in ipairs(marks(b)) do
+    if m[2] == 4 and m[4].hl_group == "MarkpreviewBold" then
+      bold = true
+    end
+  end
+  check("inline still rendered outside tables", bold)
+end
+
+-- a <br> in a cell stacks onto a virtual line below the row
+do
+  local b = md({ "| S | R |", "| - | - |", "| x | NEW<br>OLD |", "", "z" })
+  vim.api.nvim_win_set_cursor(0, { 5, 0 })
+  R.render(b)
+  local stacked = false
+  for _, m in ipairs(marks(b)) do
+    if m[2] == 2 and m[4].virt_lines then
+      for _, vl in ipairs(m[4].virt_lines) do
+        local s = ""
+        for _, c in ipairs(vl) do
+          s = s .. c[1]
+        end
+        if s:find("OLD", 1, true) then
+          stacked = true
+        end
+      end
+    end
+  end
+  check("multi-line cell stacks OLD onto a virtual line", stacked)
+end
+
+-- a table wider than the window is left raw (so it stays horizontally scrollable)
+do
+  local wide = "| " .. string.rep("x", 120) .. " | y |"
+  local b = md({ "| A | B |", "| - | - |", wide, "", "z" })
+  vim.api.nvim_win_set_cursor(0, { 5, 0 })
+  R.render(b)
+  local boxed = false
+  for _, m in ipairs(marks(b)) do
+    if m[4].virt_text or m[4].conceal == "" then
+      boxed = true
+    end
+  end
+  check("over-wide table left raw (not boxed)", not boxed)
 end
 
 -- filetype guard ------------------------------------------------------------

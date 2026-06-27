@@ -120,6 +120,8 @@ render-markdown.nvim), built on the bundled treesitter `markdown` /
   - lists           `-`/`*`/`+` -> • ○ ◆ ◇ by depth
   - task lists      `[ ]` -> ☐, `[x]` -> ☑
   - code blocks     a background band + the language label (fences concealed)
+  - tables          a box (│ borders, ├─┼─┤ separator); a cell's `<br>` line
+                    breaks stack onto extra (virtual) lines
   - block quotes    a coloured bar in place of `>`
   - thematic breaks a full-width rule
   - inline          **bold** *italic* `code` ~~strike~~ and [links] with the
@@ -133,12 +135,16 @@ per-element flag (`render.heading.enable`, `render.code.enable`, …) to disable
 a piece. Icons and highlight groups (MarkpreviewH1.. MarkpreviewBullet,
 MarkpreviewQuote, MarkpreviewCodeBlock, …) are all overridable.
 
-Tables are intentionally left as markpreview-aligned monospace text: inline
-markup inside cells is NOT concealed there, because shrinking a cell's visual
-width would break the column alignment. Use |:MarkTableFormat| to align them.
+Tables are drawn as a box with column widths computed from the rendered cell
+text (so they look tidy even if the source isn't aligned). A cell that contains
+`<br>` is shown across multiple lines — `<br>` is the only valid way to put a
+line break in a GFM cell, and the cell editor (|:MarkTableCellEdit|) writes it
+for you. A table wider than the window is left as raw text so it can still be
+scrolled horizontally. Disable boxing with `render.table.enable = false`. Inline
+markup inside cells is rendered as plain text (no emphasis styling).
 
 This replaces render-markdown.nvim for these elements; it is not a full clone
-(no LaTeX/callouts/box-drawn tables).
+(no LaTeX/callouts).
 
 ==============================================================================
 6. WRAP                                                       *markpreview-wrap*

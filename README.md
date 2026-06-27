@@ -10,10 +10,12 @@ An in-editor **markdown editing & navigation layer** for Neovim:
    from wherever the cursor sits. Alignment, wide/CJK widths and `|`/`\`
    escaping are all handled.
 3. **In-buffer rendering** — treesitter-driven: heading icons, list bullets,
-   task checkboxes, code-block backgrounds + language label, quote bars,
+   task checkboxes, code-block backgrounds + language label, **boxed tables**
+   (`│`/`├─┼─┤`, with `<br>` cells stacked onto multiple lines), quote bars,
    thematic rules, and concealed inline markers (**bold**, *italic*, `code`,
-   ~~strike~~, [links]). Raw source is revealed on the cursor line. A focused
-   subset of render-markdown.nvim — no extra plugin. `:MarkRenderToggle` / `\r`.
+   ~~strike~~, [links]). Raw source is revealed on the cursor line; tables wider
+   than the window stay raw (scrollable). A focused subset of render-markdown.nvim
+   — no extra plugin. `:MarkRenderToggle` / `\r`.
 4. **No wrap** — `nowrap` by default with smooth horizontal scrolling, and a
    one-key toggle to flip into word-aware soft wrap.
 5. **Export** — `:MarkExportPdf` / `:MarkExportHtml` via the bundled `md2pdf`
