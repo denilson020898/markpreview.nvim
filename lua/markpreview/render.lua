@@ -157,8 +157,11 @@ local function tbl_align(c)
   return "left"
 end
 
--- Split a cell's text on <br> into display segments (markers unescaped).
+-- Split a cell's text on <br> into display segments (markers unescaped). Tabs
+-- are flattened to a space: their display width is column-position dependent,
+-- which would desync the measured width from the drawn glyph and skew the box.
 local function tbl_segments(cell)
+  cell = cell:gsub("\t", " ")
   local out = {}
   for seg in (cell:gsub(TBL_BR, "\n") .. "\n"):gmatch("(.-)\n") do
     out[#out + 1] = tbl_unescape(vim.trim(seg))
@@ -269,12 +272,26 @@ local function render_table(buf, node, ctx)
     return chunks
   end
 
-  local n = #rows
+  -- First/last rows within the rendered band — the box caps anchor here so the
+  -- box stays closed even when the header / last row is scrolled off or holds
+  -- the cursor (only that row's own content is suppressed for editing).
+  local first_band, last_band
+  for _, r in ipairs(rows) do
+    if r.lnum >= ctx.srow and r.lnum <= ctx.erow then
+      first_band = first_band or r
+      last_band = r
+    end
+  end
+  if not first_band then
+    return
+  end
+
+  -- Row content: concealed source + overlaid box row; skipped on any cursor row.
   for i, r in ipairs(rows) do
     local L = r.lnum
     if L >= ctx.srow and L <= ctx.erow and not ctx.cursor_rows[L] then
-      local vlines = {}
       local opts = { end_col = #r.raw, conceal = "", virt_text_pos = "overlay", hl_mode = "combine" }
+      local vlines = {}
       if i == delim then
         opts.virt_text = hborder("├", "┼", "┤")
       else
@@ -284,17 +301,24 @@ local function render_table(buf, node, ctx)
           vlines[#vlines + 1] = datachunks(r, k, texthl)
         end
       end
-      if i == n then
+      -- Close the box under the last visible row, in the SAME extmark so it
+      -- sits below any stacked <br> lines.
+      if r == last_band then
         vlines[#vlines + 1] = hborder("└", "┴", "┘")
       end
       if #vlines > 0 then
         opts.virt_lines = vlines
       end
       mark(buf, L, 0, opts)
-      if i == 1 then
-        mark(buf, L, 0, { virt_lines = { hborder("┌", "┬", "┐") }, virt_lines_above = true })
-      end
     end
+  end
+
+  -- Top cap (separate, above the first visible row) and a bottom-cap fallback
+  -- for when the last visible row holds the cursor (and so was skipped above).
+  -- Both are drawn regardless of the cursor so the box stays closed while editing.
+  mark(buf, first_band.lnum, 0, { virt_lines = { hborder("┌", "┬", "┐") }, virt_lines_above = true })
+  if ctx.cursor_rows[last_band.lnum] then
+    mark(buf, last_band.lnum, 0, { virt_lines = { hborder("└", "┴", "┘") } })
   end
 end
 
@@ -449,21 +473,23 @@ function M.render(buf)
   -- One band per window showing this buffer (margin bounded by that window's
   -- height — never by the gap between two far-apart windows), plus the set of
   -- cursor rows. If the buffer isn't displayed, there's nothing to render.
-  local bands, cursor_rows, hr_width = {}, {}, 80
-  for i, w in ipairs(vim.fn.win_findbuf(buf)) do
+  local bands, cursor_rows, hr_width = {}, {}, nil
+  for _, w in ipairs(vim.fn.win_findbuf(buf)) do
     local wi = vim.fn.getwininfo(w)[1]
     if wi then
       local margin = math.max(20, wi.botline - wi.topline)
       bands[#bands + 1] = { math.max(0, wi.topline - 1 - margin), math.min(lc - 1, wi.botline - 1 + margin) }
       cursor_rows[vim.api.nvim_win_get_cursor(w)[1] - 1] = true
-      if i == 1 then
-        hr_width = math.max(1, wi.width - (wi.textoff or 0))
-      end
+      -- Narrowest text width across all windows showing the buffer: a buffer
+      -- extmark can't vary per window, so box conservatively (never overflow).
+      local tw = math.max(1, wi.width - (wi.textoff or 0))
+      hr_width = hr_width and math.min(hr_width, tw) or tw
     end
   end
   if #bands == 0 then
     return
   end
+  hr_width = hr_width or 80
   -- Merge overlapping/adjacent bands into a minimal set of disjoint ranges.
   table.sort(bands, function(a, b)
     return a[1] < b[1]

@@ -231,6 +231,67 @@ do
   check("code band clamped to viewport (<120, not ~300)", bands < 120, bands)
 end
 
+-- box caps (top/bottom border) survive the cursor sitting on the header/last row
+do
+  local b = md({ "| A | B |", "| - | - |", "| one | two |", "| last | row |" })
+  local function vline_has(needle)
+    for _, m in ipairs(marks(b)) do
+      if m[4].virt_lines then
+        for _, vl in ipairs(m[4].virt_lines) do
+          local s = ""
+          for _, c in ipairs(vl) do
+            s = s .. c[1]
+          end
+          if s:find(needle, 1, true) then
+            return true
+          end
+        end
+      end
+    end
+    return false
+  end
+  vim.api.nvim_win_set_cursor(0, { 1, 0 }) -- cursor on header
+  R.render(b)
+  check("top border kept with cursor on header", vline_has("┌"))
+  check("bottom border kept with cursor on header", vline_has("└"))
+  vim.api.nvim_win_set_cursor(0, { 4, 0 }) -- cursor on last row
+  R.render(b)
+  check("top border kept with cursor on last row", vline_has("┌"))
+  check("bottom border kept with cursor on last row", vline_has("└"))
+end
+
+-- a literal TAB in a cell must not desync the box widths
+do
+  local b = md({ "| a\tb | c |", "| - | - |", "| x | y |", "", "z" })
+  vim.api.nvim_win_set_cursor(0, { 5, 0 })
+  R.render(b)
+  local function w(cl)
+    local s = ""
+    for _, c in ipairs(cl) do
+      s = s .. c[1]
+    end
+    return vim.fn.strdisplaywidth(s)
+  end
+  local widths = {}
+  for _, m in ipairs(marks(b)) do
+    if m[4].virt_text then
+      widths[#widths + 1] = w(m[4].virt_text)
+    end
+    if m[4].virt_lines then
+      for _, vl in ipairs(m[4].virt_lines) do
+        widths[#widths + 1] = w(vl)
+      end
+    end
+  end
+  local same = #widths > 1
+  for _, x in ipairs(widths) do
+    if x ~= widths[1] then
+      same = false
+    end
+  end
+  check("tab cell: all box lines equal width", same, table.concat(widths, ","))
+end
+
 print(string.rep("-", 40))
 print(fails == 0 and "ALL RENDER SPEC TESTS PASSED" or (fails .. " RENDER SPEC TEST(S) FAILED"))
 vim.cmd(fails == 0 and "qa!" or "cq")
