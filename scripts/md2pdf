@@ -5,6 +5,8 @@
 #
 # Required:  pandoc + a Chromium-family browser (chrome/chromium/brave/edge).
 # Style:     centered "zen" reading column, Hack Nerd Font, dark or light theme.
+# HTML:      --html-only output is interactive — click a heading to fold its
+#            section, or a list item to fold its nested points (PDF stays flat).
 #
 # Usage:
 #   md2pdf INPUT.md [-o OUT] [--theme dark|light] [--font NAME] [--width W]
@@ -76,6 +78,7 @@ css="$(mktemp --suffix=.css)"
 cleanup() {
   [ "$keep_html" -eq 1 ] || [ "$html_only" -eq 1 ] || rm -f "$html"
   rm -f "$css"
+  [ -n "${foldjs:-}" ] && rm -f "$foldjs"
   [ -n "${crdir:-}" ] && rm -rf "$crdir"
   return 0
 }
@@ -128,6 +131,68 @@ li.task-list-item { list-style: none; margin-left: -1.3em; }
 table, figure, pre, blockquote { page-break-inside: avoid; }
 CSS
 
+# ---- foldable sections + list points (interactive HTML only) ------------
+# Carets and collapse rules plus a tiny click-to-toggle script. Gated on
+# --html-only: PDF output renders fully expanded and never sees this.
+pandoc_extra=()
+if [ "$html_only" -eq 1 ]; then
+  cat >>"$css" <<'FOLDCSS'
+/* foldable headings (pandoc --section-divs) and nested list points */
+.foldable-section > h1, .foldable-section > h2, .foldable-section > h3,
+.foldable-section > h4, .foldable-section > h5, .foldable-section > h6,
+li.foldable { cursor: pointer; }
+.foldable-section > h1::before, .foldable-section > h2::before,
+.foldable-section > h3::before, .foldable-section > h4::before,
+.foldable-section > h5::before, .foldable-section > h6::before {
+  content: "\25BE"; display: inline-block; width: 1em; margin-left: -1.15em;
+  opacity: .4; font-size: .7em; vertical-align: middle;
+}
+.foldable-section.folded > h1::before, .foldable-section.folded > h2::before,
+.foldable-section.folded > h3::before, .foldable-section.folded > h4::before,
+.foldable-section.folded > h5::before, .foldable-section.folded > h6::before {
+  content: "\25B8";
+}
+.foldable-section.folded > :not(:first-child) { display: none; }
+li.foldable { list-style: none; }
+li.foldable::before {
+  content: "\25BE"; display: inline-block; width: 1em; margin-left: -1.25em;
+  opacity: .45; font-size: .72em; vertical-align: middle;
+}
+li.foldable.folded::before { content: "\25B8"; }
+li.foldable.folded > ul, li.foldable.folded > ol { display: none; }
+FOLDCSS
+
+  foldjs="$(mktemp --suffix=.html)"
+  cat >"$foldjs" <<'FOLDJS'
+<script>
+(function () {
+  // Headings: pandoc --section-divs wraps each one's body in a <section>.
+  document.querySelectorAll('section[class*="level"]').forEach(function (sec) {
+    var h = sec.firstElementChild;
+    if (!h || !/^H[1-6]$/.test(h.tagName) || sec.children.length <= 1) return;
+    sec.classList.add('foldable-section');
+    h.addEventListener('click', function (e) {
+      if (e.target.closest('a')) return;        // let links work
+      sec.classList.toggle('folded');
+    });
+  });
+  // List points: any item that has a nested sub-list.
+  document.querySelectorAll('li').forEach(function (li) {
+    if (!li.querySelector(':scope > ul, :scope > ol')) return;
+    li.classList.add('foldable');
+    li.addEventListener('click', function (e) {
+      if (e.target.closest('a')) return;        // let links work
+      if (e.target.closest('li') !== li) return; // ignore clicks on child items
+      li.classList.toggle('folded');
+      e.stopPropagation();
+    });
+  });
+})();
+</script>
+FOLDJS
+  pandoc_extra=(--section-divs --include-after-body "$foldjs")
+fi
+
 pandoc "$input" \
   --from gfm \
   --to html5 \
@@ -137,6 +202,7 @@ pandoc "$input" \
   --highlight-style "$highlight" \
   --css "$css" \
   --resource-path "$(dirname "$input")" \
+  ${pandoc_extra[@]+"${pandoc_extra[@]}"} \
   -o "$html"
 
 if [ "$html_only" -eq 1 ]; then
